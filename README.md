@@ -2,89 +2,171 @@
 
 ![Python](https://img.shields.io/badge/Python-3.8%2B-blue)
 ![Library](https://img.shields.io/badge/Library-Pandas%20|%20Sklearn-orange)
-![Status](https://img.shields.io/badge/Status-Production%20Ready-green)
+![Model](https://img.shields.io/badge/Model-Logistic%20Regression-brightgreen)
+![Release](https://img.shields.io/badge/Release-v1.1-success)
 
+Bu proje, çalışanların demografik ve sağlık verilerini kullanarak **devamsızlık olasılığını** tahmin eden uçtan uca bir veri bilimi uygulamasıdır.  
 
-Bu proje, bir kurumdaki çalışanların demografik özelliklerini ve sağlık verilerini analizerek, **Lojistik Regresyon** modeli yardımıyla gelecekteki devamsızlık olasılıklarını tahmin eden uçtan uca bir veri bilimi çözümüdür. Aynı zamanda ham veriden canlı sisteme (deployment) giden süreci adım adım gösteren **eğitici bir rehber** niteliğindedir.
+Çalışma yalnızca model eğitimi değil; ham veriden başlayarak **preprocessing → model training → model export → inference module → entegrasyon → sürümleme (release)** adımlarını kapsayan tam bir ML pipeline örneğidir.
 
----
-
-## 📂 Proje Klasör Yapısı
-
-Proje, yönetilebilirliği artırmak ve süreci şeffaf hale getirmek için modüler bir yapıda kurgulanmıştır:
-
-- **`Data_0/`**: 
-  - Projenin yakıtı olan ham veri (`Absenteeism_data.csv`) ve işlemden geçmiş ara dosyaları barındırır.
-  
-- **`Notebooks_1/`**: 
-  - Veri keşfi (EDA), görselleştirme ve özellik mühendisliği (feature engineering) adımlarını içerir.
-  - Model eğitim süreçlerinin adım adım dokümante edildiği Jupyter Notebook'lar buradadır.
-
-- **`Model_Integration/`**: 
-  - Sistemin "canlıya" alınmaya hazır versiyonudur. 
-  - `absenteeism_module.py`: Özel olarak yazılmış Python modülü.
-  - `model` & `scaler`: Eğitilmiş ve serileştirilmiş (pickled) makine öğrenmesi dosyaları.
+Proje aynı zamanda eğitim ve portfolyo amaçlı, adım adım izlenebilir bir uygulama rehberi olarak tasarlanmıştır.
 
 ---
 
-## ⚙️ Teknik İş Akışı ve Metodoloji
+# Current Stable Version
 
-Bu projede "Black Box" (Kara Kutu) modeller yerine, neden-sonuç ilişkisinin net olarak görülebildiği istatistiksel yöntemler tercih edilmiştir.
+**Latest release:** `v1.1 — Inference pipeline stabilized`
 
-### 1. Veri Ön İşleme (Preprocessing)
-Veri seti, makine öğrenmesi algoritmasına girmeden önce titiz bir temizlik sürecinden geçirilmiştir:
-- **Kategorizasyon**: 28 farklı devamsızlık nedeni, istatistiksel anlamlılığı artırmak için **4 ana karakteristik grup** altında toplanmıştır.
-- **Feature Engineering**: 'Date' (Tarih) değişkeninden ay, gün ve yıl bilgileri türetilmiş; kategorik değişkenler (Eğitim vb.) ikili (binary) yapıya dönüştürülmüştür.
-- **Standardizasyon**: Sayısal değişkenler (Maaş, İş Yükü vb.), modelin katsayılarını (weights) dengeli hesaplayabilmesi için `StandardScaler` ile ölçeklendirilmiştir.
+Bu sürümde:
 
-### 2. Makine Öğrenmesi Modeli
-- **Algoritma**: Sınıflandırma problemi için endüstri standardı olan **Lojistik Regresyon** kullanılmıştır.
-- **Matematiksel Temel**: Her çalışan için devamsızlık olasılığı aşağıdaki Sigmoid fonksiyonu ile hesaplanır:
-  
-  $$P(Y=1) = \frac{1}{1 + e^{-z}}$$
-  
-  *(Burada $z$, girdilerin ağırlıklı toplamıdır.)*
-
-- **Performans & Kayıt**: Model %70+ doğruluk oranıyla eğitilmiş; tekrar kullanılabilirlik için `pickle` formatında `model` ve `scaler` dosyaları olarak kaydedilmiştir.
-
-### 3. Modülerizasyon ve Entegrasyon (Deployment)
-Notebook üzerindeki kodlar, dış dünyada (web sitesi, uygulama vb.) kullanılabilmesi için **Nesne Yönelimli Programlama (OOP)** prensipleriyle `absenteeism_module.py` dosyasına dönüştürülmüştür. Bu sayede tek bir satır kod ile yeni veriler üzerinde tahmin yapılabilir.
+- inference modülü stabilize edildi
+- preprocessing akışı daha güvenli hale getirildi
+- opsiyonel kolonlar için varsayılan değer desteği eklendi
+- entegrasyon notebook finalize edildi
+- git yapılandırması ve repo hijyeni düzenlendi
 
 ---
 
-## 🚀 Kullanım (Quick Start)
+# Proje Klasör Yapısı
 
-Bu projeyi kendi bilgisayarınızda çalıştırmak veya yeni bir veri seti üzerinde tahmin yapmak için `Model_Integration` klasörünü kullanabilirsiniz:
+Absenteeism_Case/
+│
+├── Data_0/
+│ └── Absenteeism_data.csv
+│
+├── Notebooks_1/
+│ ├── EDA
+│ ├── preprocessing
+│ └── model training notebookları
+│
+├── Model_Integration/
+│ ├── absenteeism_module.py
+│ ├── Absenteeism_case_Integration.ipynb
+│ ├── model
+│ ├── scaler
+│ └── Absenteeism_new_data.csv
+│
+├── requirements.txt
+├── .gitignore
+└── README.md
+
+
+---
+
+# Teknik Yaklaşım
+
+## Veri Ön İşleme (Preprocessing)
+
+- 28 farklı devamsızlık nedeni → **4 ana kategoriye** indirgenmiştir
+- Tarih sütunundan:
+  - Month Value
+  - Day of Week
+  türetilmiştir
+- Eğitim seviyesi binary yapıya dönüştürülmüştür
+- Sayısal değişkenler standartlaştırılmıştır
+- Dummy değişkenler özel **CustomScaler** ile korunmuştur
+
+---
+
+## Makine Öğrenmesi Modeli
+
+- Algoritma: **Logistic Regression**
+- Problem: Binary classification
+- Çıktılar:
+  - Devamsızlık olasılığı (Probability)
+  - Sınıf tahmini (0/1)
+
+### Sigmoid fonksiyonu:
+
+P(Y=1) = 1 / (1 + e^-z)
+
+
+Model ve scaler tekrar kullanılabilirlik için pickle formatında kaydedilmiştir.
+
+---
+
+## Inference Modülü (OOP)
+
+Notebook kodları üretim kullanımına uygun olacak şekilde:
+
+absenteeism_module.py
+
+
+modülüne dönüştürülmüştür.
+
+Modül şunları sağlar:
+
+- OOP tabanlı kullanım
+- Model + scaler yükleme
+- Otomatik preprocessing
+- Kolon doğrulama
+- Eksik opsiyonel kolonları otomatik tamamlama (örn: Pet → 0)
+- Tahmin + olasılık çıktısı
+
+---
+
+## Quick Start — Tahmin Üretme
+
+`Model_Integration` klasörüne gidin:
 
 ```python
-# Modülü projeye dahil et
 from absenteeism_module import absenteeism_model
 
-# Modeli ve Scaler'ı yükle (Dosyaların aynı dizinde olduğundan emin olun)
-model = absenteeism_model('model', 'scaler')
+model = absenteeism_model("model", "scaler")
 
-# Yeni veriyi sisteme yükle ve temizle
-model.load_and_clean_data('Absenteeism_new_data.csv')
+model.load_and_clean_data("Absenteeism_new_data.csv")
 
-# Tahmin sonuçlarını al
-predictions = model.predicted_outputs()
+results = model.predicted_outputs()
 
-# Sonuçları görüntüle
-print(predictions.head())
+print(results.head())
 
+csv.çıktısı:
+results.to_csv("Absenteeism_predictions.csv", index=False)
 
-
-## 📦 Kurulum
-
-Projeyi kendi ortamınızda çalıştırmak için:
-
-```bash
-# 1. Repository'i klonlayın
-git clone https://github.com/Tuncay-Sahin/Absenteeism_Case.git
-cd Absenteeism_Case
-
-# 2. Bağımlılıkları yükleyin
-pip install -r requirements.txt
+Opsiyonel — tarihli çıktı:
+results.to_csv(
+    f"Absenteeism_predictions_{pd.Timestamp.now().date()}.csv",
+    index=False
+)
 ```
 
----
+## Robust Input Handling
+
+Inference pipeline:
+
+kritik kolonlar eksikse hata verir
+
+bazı opsiyonel kolonları otomatik ekler
+
+kolon sırası değişse bile isim bazlı çalışır
+
+index hizasını korur.
+
+## Kurulum
+
+git clone https://github.com/Tuncay-Sahin/Absenteeism_Case.git
+cd Absenteeism_Case
+pip install -r requirements.txt
+
+## Proje Amacı
+
+Bu çalışma:
+
+uçtan uca ML pipeline pratiği
+
+inference mimarisi kurma
+
+notebook → modül dönüşümü
+
+model entegrasyonu
+
+sürümleme ve repo yönetimi
+
+konularında uygulamalı öğrenme amacı taşır.
+
+## Not
+
+Bu repo bir “black-box model demo” değil; 
+izlenebilir, modüler ve sürümlenmiş bir ML inference pipeline örneğidir.
+
+
