@@ -1,27 +1,20 @@
-## Installation
+## 📦 Kurulum
 
-To set up the project, follow these instructions:
+Projeyi kendi ortamınızda çalıştırmak için:
 
-1. Clone the repository:
-   
-   ```bash
-   git clone https://github.com/Tuncay-Sahin/Absenteeism_Case.git
-   ```
+```bash
+# 1. Repository'i klonlayın
+git clone https://github.com/Tuncay-Sahin/Absenteeism_Case.git
+cd Absenteeism_Case
 
-2. Navigate to the project directory:
-   
-   ```bash
-   cd Absenteeism_Case
-   ```
+# 2. Virtual environment oluşturun (opsiyonel ama önerili)
+python -m venv venv
+source venv/bin/activate  # Linux/Mac
+# veya
+venv\Scripts\activate  # Windows
 
-3. Install dependencies:
-   
-   ```bash
-   pip install -r requirements.txt
-   ```
+# 3. Bağımlılıkları yükleyin
+pip install -r requirements.txt
+```
 
-4. Run the application:
-   
-   ```bash
-   python app.py
-   ```
+---
