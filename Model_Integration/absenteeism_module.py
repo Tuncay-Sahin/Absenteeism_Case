@@ -1,168 +1,343 @@
-
-
 # -*- coding: utf-8 -*-
 
+"""
+Absenteeism inference module.
 
+Amaç:
+- Pickle edilmiş Logistic Regression model + scaler ile yeni veride preprocessing yapıp tahmin üretmek.
 
-# ======================================================================================
-# ABSENTEEISM MODULE (DEVAMSIZLIK MODÜLÜ)
-# Veri Bilimi Projesi
-# Amaç: Eğitilmiş Lojistik Regresyon modelini kullanarak yeni veriler üzerinde tahmin yapmak.
-# =======================================================================================
+Notlar:
+- Yeni veri bazen 'Pet' kolonunu içermeyebilir. Bu durumda Pet=0 olarak tamamlanır.
+- Kolon isimleri zorla df.columns = [...] ile set edilmez; isim bazlı ve güvenli dönüşüm yapılır.
+"""
+
+from __future__ import annotations
+
+import pickle
+from pathlib import Path
+from typing import Iterable, Optional, Union
 
 import numpy as np
 import pandas as pd
-import pickle
-from sklearn.preprocessing import StandardScaler
 from sklearn.base import BaseEstimator, TransformerMixin
+from sklearn.preprocessing import StandardScaler
 
-# ---------------------------------------------------------------------------------------
-# ÖZEL ÖLÇEKLEYİCİ (CUSTOM SCALER) SINIFI
-# ---------------------------------------------------------------------------------------
-# Açıklama: Standart Scaler normalde tüm sütunları ölçeklendirir.
-# Ancak biz dummy (0-1) değişkenlerin bozulmasını istemiyoruz.
-# Bu sınıf, sadece bizim seçtiğimiz sayısal sütunları ölçeklendirir.
-# ---------------------------------------------------------------------------------------
-class CustomScaler(BaseEstimator, TransformerMixin): 
-    
-    def __init__(self, columns, copy=True, with_mean=True, with_std=True):
+
+# -----------------------------
+# Sabitler
+# -----------------------------
+REASON_GROUPS = {
+    "Reason_1": (1, 14),
+    "Reason_2": (15, 17),
+    "Reason_3": (18, 21),
+    # Reason_4: 22 ve üzeri (veri setinde genelde 28'e kadar)
+    "Reason_4": (22, None),
+}
+
+# Yeni veride beklenen minimum kolonlar
+REQUIRED_COLUMNS = {
+    "ID",
+    "Date",
+    "Reason for Absence",
+    "Transportation Expense",
+    "Distance to Work",
+    "Age",
+    "Daily Work Load Average",
+    "Body Mass Index",
+    "Education",
+    "Children",
+    "Pet",  # -> yeni veride yoksa OPTIONAL_DEFAULTS ile tamamlanır
+}
+
+# Eksik gelirse otomatik tamamlanacak kolonlar
+OPTIONAL_DEFAULTS = {
+    "Pet": 0,
+}
+
+
+# -----------------------------
+# CustomScaler
+# -----------------------------
+class CustomScaler(BaseEstimator, TransformerMixin):
+    """
+    Seçili kolonları StandardScaler ile ölçeklendirir; dummy vb. diğer kolonları korur.
+    """
+
+    def __init__(self, columns: Iterable[str], copy: bool = True, with_mean: bool = True, with_std: bool = True):
+        self.columns = list(columns)
         self.scaler = StandardScaler(copy, with_mean, with_std)
-        self.columns = columns
         self.mean_ = None
         self.var_ = None
 
-    def fit(self, X, y=None):
+    def fit(self, X: pd.DataFrame, y=None):
         self.scaler.fit(X[self.columns], y)
         self.mean_ = np.array(np.mean(X[self.columns]))
         self.var_ = np.array(np.var(X[self.columns]))
         return self
 
-    def transform(self, X, y=None, copy=None):
+    def transform(self, X: pd.DataFrame, y=None, copy=None) -> pd.DataFrame:
         init_col_order = X.columns
-        X_scaled = pd.DataFrame(self.scaler.transform(X[self.columns]), columns=self.columns)
+
+        # index korunur (satır hizası bozulmaz)
+        X_scaled = pd.DataFrame(
+            self.scaler.transform(X[self.columns]),
+            columns=self.columns,
+            index=X.index,
+        )
         X_not_scaled = X.loc[:, ~X.columns.isin(self.columns)]
         return pd.concat([X_not_scaled, X_scaled], axis=1)[init_col_order]
 
 
-# ---------------------------------------------------------------------------------------
-# ANA MODEL SINIFI (ABSENTEEISM MODEL)
-# ---------------------------------------------------------------------------------------
-# Açıklama: Bu sınıf, eğitilmiş model dosyalarını okur ve ham veriyi işleyip tahmin üretir.
-# ---------------------------------------------------------------------------------------
-class absenteeism_model():
-      
-    def __init__(self, model_file, scaler_file):
-        # 1. ADIM: Model ve Scaler dosyalarını yükle
-        # 'pickle' kütüphanesi ile daha önce kaydettiğimiz eğitimli dosyaları okuyoruz.
-        with open('model', 'rb') as model_file, open('scaler', 'rb') as scaler_file:
-            self.reg = pickle.load(model_file)     # Lojistik Regresyon Katsayıları
-            self.scaler = pickle.load(scaler_file) # Ölçeklendirme İstatistikleri
-            self.data = None
-    
-    # 2. ADIM: Veriyi Yükle ve Temizle (Preprocessing)
-    # Burası "önişleme" aşamasında yapılan tüm işlemlerin otomatize edilmiş halidir.
-    def load_and_clean_data(self, data_file):
-        
-        # CSV dosyasını oku
-        df = pd.read_csv(data_file, delimiter=',')
-        
-        # Orijinal veriyi sakla (daha sonra tahminleri yanına eklemek için)
+# -----------------------------
+# Main model
+# -----------------------------
+class absenteeism_model:
+    """
+    Pickle edilmiş model + scaler ile inference yapan sınıf.
+
+    Parameters
+    ----------
+    model_file : str | Path
+        Pickle edilmiş model dosyası (örn: 'model')
+    scaler_file : str | Path
+        Pickle edilmiş scaler dosyası (örn: 'scaler')
+    """
+
+    def __init__(self, model_file: Union[str, Path], scaler_file: Union[str, Path]):
+        model_path = Path(model_file)
+        scaler_path = Path(scaler_file)
+
+        try:
+            with model_path.open("rb") as f_model, scaler_path.open("rb") as f_scaler:
+                self.reg = pickle.load(f_model)
+                self.scaler = pickle.load(f_scaler)
+        except FileNotFoundError as e:
+            raise FileNotFoundError(
+                f"Model/Scaler dosyası bulunamadı. model_file='{model_path}', scaler_file='{scaler_path}'. "
+                f"Çalışma dizinini ve dosya adlarını kontrol edin."
+            ) from e
+        except Exception as e:
+            raise RuntimeError(
+                "Model/Scaler yüklenirken hata oluştu. Dosyalar bozuk olabilir veya pickle uyumsuz olabilir."
+            ) from e
+
+        self.data: Optional[pd.DataFrame] = None
+        self.preprocessed_data: Optional[pd.DataFrame] = None
+        self.df_with_predictions: Optional[pd.DataFrame] = None
+
+    # --------------- helpers ---------------
+    @staticmethod
+    def _validate_and_fill_columns(df: pd.DataFrame) -> None:
+        """
+        Girdi kolonlarını kontrol eder.
+        - Eksik opsiyonel kolonları default ile ekler.
+        - Diğer eksik kolonlar varsa hata verir.
+        """
+        missing = REQUIRED_COLUMNS - set(df.columns)
+
+        # Opsiyonelleri ekle
+        for col, default in OPTIONAL_DEFAULTS.items():
+            if col in missing:
+                df[col] = default
+                missing.remove(col)
+
+        if missing:
+            raise ValueError(f"Girdi verisinde eksik kolon(lar) var: {sorted(missing)}")
+
+    @staticmethod
+    def _coerce_reason_dummy_columns(reason_columns: pd.DataFrame) -> pd.DataFrame:
+        """
+        Dummy kolon isimleri bazen int, bazen string gelir.
+        Mümkünse int'e çevirerek 1:14 gibi aralık seçimlerini sağlamlaştırır.
+        """
+        try:
+            reason_columns.columns = reason_columns.columns.astype(int)
+        except Exception:
+            pass
+        return reason_columns
+
+    @staticmethod
+    def _group_reason(reason_columns: pd.DataFrame, start: int, end: Optional[int]) -> pd.Series:
+        """
+        reason_columns içinden start-end aralığındaki dummy kolonlardan satır bazında max alır.
+        end=None -> start ve sonrası.
+        """
+        if reason_columns.shape[1] == 0:
+            return pd.Series(0, index=reason_columns.index)
+
+        cols = reason_columns.columns
+
+        # İnt kolonlar için hızlı yol
+        if pd.api.types.is_integer_dtype(cols):
+            sub = reason_columns.loc[:, start:] if end is None else reason_columns.loc[:, start:end]
+            if sub.shape[1] == 0:
+                return pd.Series(0, index=reason_columns.index)
+            return sub.max(axis=1)
+
+        # String/karma kolonlar için: sayıya çevrilebilenleri seç
+        selected = []
+        for c in cols:
+            try:
+                v = int(c)
+            except Exception:
+                continue
+
+            if end is None:
+                if v >= start:
+                    selected.append(c)
+            else:
+                if start <= v <= end:
+                    selected.append(c)
+
+        if not selected:
+            return pd.Series(0, index=reason_columns.index)
+
+        return reason_columns[selected].max(axis=1)
+
+    def _require_data_loaded(self) -> None:
+        if self.data is None or self.preprocessed_data is None:
+            raise ValueError("Veri yüklü değil. Önce load_and_clean_data(data_file) çağırın.")
+
+    # --------------- public API ---------------
+    def load_and_clean_data(self, data_file: Union[str, Path]) -> None:
+        """
+        Yeni veri dosyasını okur ve eğitimdeki preprocessing adımlarının inference versiyonunu uygular.
+        """
+        data_path = Path(data_file)
+        try:
+            df = pd.read_csv(data_path, delimiter=",")
+        except FileNotFoundError as e:
+            raise FileNotFoundError(
+                f"Veri dosyası bulunamadı: '{data_path}'. Çalışma dizini ve dosya adını kontrol edin."
+            ) from e
+
+        # Kolon kontrolü + opsiyonel kolonları ekle
+        self._validate_and_fill_columns(df)
+
+        # Ham veriyi sakla
         self.df_with_predictions = df.copy()
-        
-        # Gereksiz 'ID' sütununu at
-        df = df.drop(['ID'], axis = 1)
-        
-        # Kod uyumluluğu için boş bir hedef değişken sütunu oluştur
-        df['Absenteeism Time in Hours'] = 'NaN'
 
-        # NEDENLERİN GRUPLANMASI (REASON GROUPING)
-        # "Reason for Absence" sütununu dummy değişkenlere çevir ve 4 ana gruba ayır.
-        reason_columns = pd.get_dummies(df['Reason for Absence'], drop_first = True)
-        
-        # Grup 1: Ciddi Hastalıklar (1-14)
-        reason_type_1 = reason_columns.loc[:, 1:14].max(axis=1)
-        # Grup 2: Hamilelik ve Doğum (15-17)
-        reason_type_2 = reason_columns.loc[:, 15:17].max(axis=1)
-        # Grup 3: Zehirlenme vb. (18-21)
-        reason_type_3 = reason_columns.loc[:, 18:21].max(axis=1)
-        # Grup 4: Hafif Sebepler (22-28)
-        reason_type_4 = reason_columns.loc[:, 22:].max(axis=1)
-        
-        # Orijinal sütunu sil ve grupları ekle
-        df = df.drop(['Reason for Absence'], axis = 1)
-        df = pd.concat([df, reason_type_1, reason_type_2, reason_type_3, reason_type_4], axis = 1)
-        
-        # Sütun isimlerini düzenle (Türkçe karakter kullanmıyoruz)
-        column_names = ['Date', 'Transportation Expense', 'Distance to Work', 'Age',
-                       'Daily Work Load Average', 'Body Mass Index', 'Education', 'Children',
-                       'Pet', 'Absenteeism Time in Hours', 'Reason_1', 'Reason_2', 'Reason_3', 'Reason_4']
-        df.columns = column_names
+        # ID düş
+        df = df.drop(["ID"], axis=1)
 
-        # Sütun sıralamasını modelin beklediği hale getir
-        column_names_reordered = ['Reason_1', 'Reason_2', 'Reason_3', 'Reason_4', 'Date', 'Transportation Expense', 
-                                  'Distance to Work', 'Age', 'Daily Work Load Average', 'Body Mass Index', 'Education', 
-                                  'Children', 'Pet', 'Absenteeism Time in Hours']
-        df = df[column_names_reordered]
-      
-        # TARİH İŞLEMLERİ (DATE PROCESSING)
-        # Tarih formatını düzelt
-        df['Date'] = pd.to_datetime(df['Date'], format='%d/%m/%Y')
+        # Eğitim notebook uyumu için placeholder (string değil)
+        df["Absenteeism Time in Hours"] = np.nan
 
-        # Ay değerini (Month Value) çıkar
-        list_months = []
-        for i in range(df.shape[0]):
-            list_months.append(df['Date'][i].month)
-        df['Month Value'] = list_months
+        # Reason dummy -> 4 grup
+        reason_columns = pd.get_dummies(df["Reason for Absence"], drop_first=True)
+        reason_columns = self._coerce_reason_dummy_columns(reason_columns)
 
-        # Haftanın gününü (Day of the Week) çıkar
-        df['Day of the Week'] = df['Date'].apply(lambda x: x.weekday())
+        r1 = self._group_reason(reason_columns, *REASON_GROUPS["Reason_1"]).rename("Reason_1")
+        r2 = self._group_reason(reason_columns, *REASON_GROUPS["Reason_2"]).rename("Reason_2")
+        r3 = self._group_reason(reason_columns, *REASON_GROUPS["Reason_3"]).rename("Reason_3")
+        r4 = self._group_reason(reason_columns, *REASON_GROUPS["Reason_4"]).rename("Reason_4")
 
-        # Artık işimiz biten 'Date' sütununu at
-        df = df.drop(['Date'], axis = 1)
+        # Reason for Absence düş + grup kolonlarını ekle (isimler net)
+        df = df.drop(["Reason for Absence"], axis=1)
+        df = pd.concat([df, r1, r2, r3, r4], axis=1)
 
-        # Sütunları tekrar sırala
-        column_names_upd = ['Reason_1', 'Reason_2', 'Reason_3', 'Reason_4', 'Month Value', 'Day of the Week',
-                            'Transportation Expense', 'Distance to Work', 'Age',
-                            'Daily Work Load Average', 'Body Mass Index', 'Education', 'Children',
-                            'Pet', 'Absenteeism Time in Hours']
-        df = df[column_names_upd]
+        # ---- Kolon sırası (isimle; df.columns = [...] yok!) ----
+        expected_after_reason = [
+            "Date",
+            "Transportation Expense",
+            "Distance to Work",
+            "Age",
+            "Daily Work Load Average",
+            "Body Mass Index",
+            "Education",
+            "Children",
+            "Pet",
+            "Absenteeism Time in Hours",
+            "Reason_1",
+            "Reason_2",
+            "Reason_3",
+            "Reason_4",
+        ]
 
-        # EĞİTİM (EDUCATION) 
-        # Lise (1) -> 0, Diğerleri (2,3,4) -> 1 olarak haritala
-        df['Education'] = df['Education'].map({1:0, 2:1, 3:1, 4:1})
+        # Eksik bir şey olursa burada net patlasın (model uyumu için)
+        missing_after_reason = [c for c in expected_after_reason if c not in df.columns]
+        if missing_after_reason:
+            raise ValueError(
+                "Preprocessing sırasında beklenen kolonlar oluşmadı. Eksikler: "
+                f"{missing_after_reason}. (CSV kolonlarını kontrol edin.)"
+            )
 
-        # Eksik veri varsa (NaN) 0 ile doldur
+        df = df[expected_after_reason]
+
+        # Modelin beklediği sıralama (Date sonra işlenip düşecek)
+        df = df[
+            [
+                "Reason_1",
+                "Reason_2",
+                "Reason_3",
+                "Reason_4",
+                "Date",
+                "Transportation Expense",
+                "Distance to Work",
+                "Age",
+                "Daily Work Load Average",
+                "Body Mass Index",
+                "Education",
+                "Children",
+                "Pet",
+                "Absenteeism Time in Hours",
+            ]
+        ]
+
+        # Date processing
+        df["Date"] = pd.to_datetime(df["Date"], format="%d/%m/%Y")
+        df["Month Value"] = df["Date"].dt.month
+        df["Day of the Week"] = df["Date"].dt.weekday
+        df = df.drop(["Date"], axis=1)
+
+        # Sütunları tekrar sırala (eğitim notebook uyumu)
+        df = df[
+            [
+                "Reason_1",
+                "Reason_2",
+                "Reason_3",
+                "Reason_4",
+                "Month Value",
+                "Day of the Week",
+                "Transportation Expense",
+                "Distance to Work",
+                "Age",
+                "Daily Work Load Average",
+                "Body Mass Index",
+                "Education",
+                "Children",
+                "Pet",
+                "Absenteeism Time in Hours",
+            ]
+        ]
+
+        # Education map
+        df["Education"] = df["Education"].map({1: 0, 2: 1, 3: 1, 4: 1})
+
+        # Eksikler
         df = df.fillna(value=0)
 
-        # GEREKSİZ SÜTUNLARI TEMİZLENİR 
-        # Analiz sonucunda etkisiz bulduğumuz sütunları atıyoruz
-        df = df.drop(['Absenteeism Time in Hours'], axis=1)
-        df = df.drop(['Day of the Week', 'Daily Work Load Average', 'Distance to Work'], axis=1)
-        
+        # Eğitimde drop edilen kolonlar
+        df = df.drop(["Absenteeism Time in Hours"], axis=1)
+        df = df.drop(["Day of the Week", "Daily Work Load Average", "Distance to Work"], axis=1)
+
         # İşlenmiş veriyi sakla
         self.preprocessed_data = df.copy()
-        
-        #  ÖLÇEKLENDİRME (SCALING) 
-        # CustomScaler kullanarak veriyi standartlaştır
+
+        # Ölçeklendir
         self.data = self.scaler.transform(df)
-    
-    # 3. ADIM: Olasılık Hesaplama (Probability)
+
     def predicted_probability(self):
-        if (self.data is not None):  
-            pred = self.reg.predict_proba(self.data)[:,1]
-            return pred
-    
-    # 4. ADIM: Tahmin Sınıfı (0 veya 1)
+        self._require_data_loaded()
+        return self.reg.predict_proba(self.data)[:, 1]
+
     def predicted_output_category(self):
-        if (self.data is not None):
-            pred_outputs = self.reg.predict(self.data)
-            return pred_outputs
-    
-    # 5. ADIM: Final Çıktı Tablosunu Oluşturma
+        self._require_data_loaded()
+        return self.reg.predict(self.data)
+
     def predicted_outputs(self):
-        if (self.data is not None):
-            # Olasılık sütununu ekle
-            self.preprocessed_data['Probability'] = self.reg.predict_proba(self.data)[:,1]
-            # Tahmin (0/1) sütununu ekle
-            self.preprocessed_data['Prediction'] = self.reg.predict(self.data)
-            return self.preprocessed_data
+        self._require_data_loaded()
+        out = self.preprocessed_data.copy()
+        out["Probability"] = self.reg.predict_proba(self.data)[:, 1]
+        out["Prediction"] = self.reg.predict(self.data)
+        return out
