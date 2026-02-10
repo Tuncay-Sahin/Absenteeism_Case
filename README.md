@@ -175,4 +175,9 @@ konularında uygulamalı öğrenme amacı taşır.
 Bu repo bir “black-box model demo” değil; 
 izlenebilir, modüler ve sürümlenmiş bir ML inference pipeline örneğidir.
 
+## Technical Documentation
+
+Full pipeline case study and methodology:
+
+docs/absenteeism_ml_pipeline_case_study.md
 
