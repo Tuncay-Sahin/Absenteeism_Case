@@ -52,6 +52,12 @@ Absenteeism_Case/
 
 
 ---
+##  Veri Notu / Data Note
+
+Bu projede kullanılan veri setleri eğitim ve gösterim amaçlı, anonimleştirilmiş ve rastgeleleştirilmiş örnek veri setleridir.  
+Gerçek kişisel veya hassas çalışan bilgisi içermez.
+
+The datasets used in this project are anonymized and randomized sample datasets prepared for educational and demonstration purposes.
 
 # Teknik Yaklaşım
 
